@@ -60,3 +60,21 @@ def test_sync_skips_download_when_version_unchanged(tmp_db, tmp_path):
 def test_sync_is_off_without_config(tmp_db, monkeypatch):
     monkeypatch.delenv("POKEPRICE_DATA_REPO", raising=False)
     assert remote.sync() is None and not remote.configured()
+
+
+@respx.mock
+def test_sync_downloads_next_to_the_data_not_system_tmp(tmp_db, tmp_path, monkeypatch):
+    # On Streamlit Cloud /tmp is another disk, and os.replace can't cross disks.
+    import tempfile
+    seen = []
+    real = tempfile.TemporaryDirectory
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("dir"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(tempfile, "TemporaryDirectory", spy)
+    _mock_release(tmp_path, "v1")
+    remote.sync(repo="me/repo")
+    assert seen and seen[0] == settings.db_path.parent
+    assert not list(settings.db_path.parent.glob(".download-*"))   # cleaned up

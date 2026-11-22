@@ -8,3 +8,4 @@ models/
 .pytest_cache/
 .streamlit/secrets.toml
 *.egg-info/
+data/.download-*/

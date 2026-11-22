@@ -74,7 +74,11 @@ def sync(repo: str | None = None, token: str | None = None, force: bool = False)
         assets = _asset_urls(client, repo)
         if MANIFEST not in assets:
             return local_version()
-        with tempfile.TemporaryDirectory() as tmp:
+        # Download next to the data, not in the system temp folder: os.replace can't move
+        # files across disks, and on Streamlit Cloud /tmp is a different disk from the app.
+        data_dir = Path(settings.db_path).parent
+        data_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=data_dir, prefix=".download-") as tmp:
             tmp = Path(tmp)
             _download(client, assets[MANIFEST], tmp / MANIFEST)
             remote = json.loads((tmp / MANIFEST).read_text())
@@ -90,7 +94,6 @@ def sync(repo: str | None = None, token: str | None = None, force: bool = False)
                 shutil.copyfileobj(src, dst)
 
             watch = db.load_watchlist() if Path(settings.db_path).exists() else None
-            Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
             models_dir = Path(settings.models_dir)
             models_dir.mkdir(parents=True, exist_ok=True)
             os.replace(db_tmp, settings.db_path)
