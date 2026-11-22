@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -27,17 +28,36 @@ DOWN_COLOR = "#DC2626"
 HORIZON_LABELS = {30: "1 month", 90: "3 months", 180: "6 months", 365: "12 months"}
 
 
-@st.cache_data(ttl=1800, show_spinner="Downloading the latest card data…")
-def _sync() -> str | None:
-    """On a hosted app, pull the data the refresh job published (at most every 30 minutes)."""
+def _secrets_to_env() -> None:
+    """Copy POKEPRICE_* Streamlit secrets into environment variables, where the pokeprice
+    package reads its settings. Streamlit Cloud doesn't always do this before the app's
+    code runs."""
     try:
-        return remote.sync()
-    except Exception as e:  # keep serving whatever data we already have
-        st.toast(f"Couldn't fetch the latest data: {e}")
-        return remote.local_version()
+        for key, value in st.secrets.items():
+            if key.startswith("POKEPRICE_") and isinstance(value, str) and value.strip():
+                os.environ[key] = value.strip()
+    except Exception:  # no secrets file (e.g. running locally): nothing to copy
+        pass
+
+
+@st.cache_data(ttl=1800, show_spinner="Downloading the latest card data…")
+def _sync_cached() -> str | None:
+    # Exceptions aren't cached, so a failed download is retried on the next page load.
+    return remote.sync()
+
+
+def _sync() -> Exception | None:
+    """On a hosted app, pull the data the refresh job published (at most every 30 minutes).
+    Returns the error if the download failed; whatever data we already have keeps serving."""
+    try:
+        _sync_cached()
+        return None
+    except Exception as e:
+        return e
 
 
 def hosted() -> bool:
+    _secrets_to_env()
     return remote.configured()
 
 
@@ -104,6 +124,23 @@ def data_mix() -> dict:
     return _mix(_db_stamp())
 
 
+def _sync_problem(err: Exception, blocking: bool) -> None:
+    repo = os.environ.get("POKEPRICE_DATA_REPO", "")
+    hint = ""
+    status = getattr(getattr(err, "response", None), "status_code", None)
+    if status in (401, 403):
+        hint = ("The token was rejected. Check that `POKEPRICE_GITHUB_TOKEN` is pasted correctly, hasn't "
+                "expired, and has *Contents: Read-only* on the data repo.")
+    elif status == 404:
+        hint = (f"GitHub couldn't find `{repo}` or its `data` release. Check the repo name, that the token "
+                "is limited to that repo, and that the *Refresh data* workflow has published at least once.")
+    msg = f"Couldn't download the published data from `{repo}`: {err}"
+    if blocking:
+        st.error(msg + ("\n\n" + hint if hint else ""))
+        st.stop()
+    st.caption(f"Showing the last downloaded data. {msg}")
+
+
 def credits() -> None:
     """Data credits. PokéWallet's terms (section 4.4) require a visible, linked credit when its
     data is shown publicly; TCGapi suggests one."""
@@ -118,11 +155,15 @@ def require_data() -> bool:
     """Pull fresh published data (hosted app), then show setup steps and stop the page if
     there is no data or model yet. Every page calls this first."""
     credits()
-    if hosted():
-        _sync()
+    err = _sync() if hosted() else None
+    if err is not None:
+        _sync_problem(err, blocking=cards().empty)
     if cards().empty:
         st.warning("No cards in the database yet.")
+        st.markdown("**Running locally?** Build the data first:")
         st.code("python scripts/refresh.py --universe\npython scripts/train.py", language="bash")
+        st.markdown("**On Streamlit Cloud?** Add `POKEPRICE_DATA_REPO` and `POKEPRICE_GITHUB_TOKEN` under "
+                    "the app's *Settings → Secrets* (see the README's Deploy section).")
         st.stop()
     if bundle() is None:
         st.warning("No trained model yet.")
