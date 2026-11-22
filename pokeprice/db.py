@@ -258,3 +258,15 @@ def watchlist_remove(card_id: str, db_path: Path | None = None) -> None:
 def load_watchlist(db_path: Path | None = None) -> pd.DataFrame:
     with connect(db_path) as conn:
         return pd.read_sql("SELECT * FROM watchlist ORDER BY added_at", conn)
+
+
+def data_stamp(db_path: Path | None = None) -> tuple:
+    """Fingerprint of the price data. Changes when cards, prices or trends change, but not on
+    watchlist edits, so cached and precomputed forecasts can tell whether they are current."""
+    if not Path(db_path or settings.db_path).exists():
+        return ()
+    with connect(db_path) as conn:
+        return tuple(conn.execute(
+            "SELECT (SELECT COUNT(*) FROM cards), (SELECT MAX(updated_at) FROM cards), "
+            "(SELECT COUNT(*) FROM price_snapshots), (SELECT MAX(date) FROM price_snapshots), "
+            "(SELECT COUNT(*) FROM trends)").fetchone())

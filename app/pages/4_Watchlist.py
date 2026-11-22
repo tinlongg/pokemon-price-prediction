@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import streamlit as st
 
-from common import HORIZON_LABELS, card_picker, cards, latest_and_forecasts, money, require_data
+from common import HORIZON_LABELS, card_picker, cards, hosted, latest_and_forecasts, money, require_data
 from pokeprice import db
 from pokeprice.watchlist import evaluate
 
 st.set_page_config(page_title="Watchlist · PokéPrice", page_icon=":material/bookmark:", layout="wide")
 st.title("Watchlist")
 require_data()
+if hosted():
+    st.caption("On this hosted demo the watchlist is shared by everyone who visits and resets when the app "
+               "restarts. Run the app locally to keep your own.")
 
 latest, fc = latest_and_forecasts()
 horizon = st.segmented_control("Forecast horizon", list(HORIZON_LABELS), default=90,

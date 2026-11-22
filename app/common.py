@@ -13,11 +13,10 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
 from pokeprice import db  # noqa: E402
-from pokeprice.config import HORIZONS, settings  # noqa: E402
-from pokeprice.features.build import build_features, latest_rows  # noqa: E402
+from pokeprice.config import settings  # noqa: E402
 from pokeprice.features.popularity import popularity_score  # noqa: E402
-from pokeprice.model import registry  # noqa: E402
-from pokeprice.model.predict import forecast  # noqa: E402
+from pokeprice import remote  # noqa: E402
+from pokeprice.model import precompute, registry  # noqa: E402
 
 REAL_COLOR = "#2563EB"
 SIM_COLOR = "#9CA3AF"
@@ -28,16 +27,22 @@ DOWN_COLOR = "#DC2626"
 HORIZON_LABELS = {30: "1 month", 90: "3 months", 180: "6 months", 365: "12 months"}
 
 
+@st.cache_data(ttl=1800, show_spinner="Downloading the latest card data…")
+def _sync() -> str | None:
+    """On a hosted app, pull the data the refresh job published (at most every 30 minutes)."""
+    try:
+        return remote.sync()
+    except Exception as e:  # keep serving whatever data we already have
+        st.toast(f"Couldn't fetch the latest data: {e}")
+        return remote.local_version()
+
+
+def hosted() -> bool:
+    return remote.configured()
+
+
 def _db_stamp() -> tuple:
-    """Changes only when cards, prices or trends change (not on watchlist edits), so cached
-    forecasts aren't recomputed every time the watchlist is updated."""
-    if not Path(settings.db_path).exists():
-        return ()
-    with db.connect() as conn:
-        return tuple(conn.execute(
-            "SELECT (SELECT COUNT(*) FROM cards), (SELECT MAX(updated_at) FROM cards), "
-            "(SELECT COUNT(*) FROM price_snapshots), (SELECT MAX(date) FROM price_snapshots), "
-            "(SELECT COUNT(*) FROM trends)").fetchone())
+    return db.data_stamp()
 
 
 def _model_stamp() -> float:
@@ -82,13 +87,8 @@ def bundle():
 @st.cache_data(show_spinner="Computing forecasts for every card…")
 def _latest_and_forecasts(db_stamp: tuple, model_stamp: float) -> tuple[pd.DataFrame, pd.DataFrame]:
     b = _bundle(model_stamp)
-    c = db.load_cards()
-    feats = build_features(c, db.load_prices(), db.load_trends(), HORIZONS, with_targets=False, latest_only=True)
-    if feats.empty:
-        return pd.DataFrame(), pd.DataFrame()
-    latest = latest_rows(feats)
-    fc = forecast(b, latest) if b else pd.DataFrame()
-    return latest, fc
+    saved = precompute.load_if_current(b)   # shipped by the refresh job; skips the heavy rebuild
+    return saved if saved is not None else precompute.compute(b)
 
 
 def latest_and_forecasts() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -105,7 +105,10 @@ def data_mix() -> dict:
 
 
 def require_data() -> bool:
-    """Show setup steps and stop the page if there is no data or model yet."""
+    """Pull fresh published data (hosted app), then show setup steps and stop the page if
+    there is no data or model yet. Every page calls this first."""
+    if hosted():
+        _sync()
     if cards().empty:
         st.warning("No cards in the database yet.")
         st.code("python scripts/refresh.py --universe\npython scripts/train.py", language="bash")

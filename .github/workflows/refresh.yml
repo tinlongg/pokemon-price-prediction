@@ -1,0 +1,101 @@
+# Keeps the hosted app's data fresh. Every 4 hours: download the last published data,
+# fetch new prices, (once a day) pull TCGapi history and retrain, precompute forecasts,
+# then publish everything to the `data` release that the app downloads.
+#
+# Needs repository secrets POKEWALLET_API_KEY and TCGAPI_KEY.
+# Run it by hand the first time (Actions tab -> Refresh data -> Run workflow) to seed the
+# release, or seed it from your own machine with scripts/publish_data.sh.
+name: Refresh data
+
+on:
+  schedule:
+    - cron: "17 */4 * * *"        # 00:17, 04:17, ... UTC
+  workflow_dispatch:
+    inputs:
+      train:
+        description: "Also pull TCGapi history and retrain"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      POKEWALLET_API_KEY: ${{ secrets.POKEWALLET_API_KEY }}
+      TCGAPI_KEY: ${{ secrets.TCGAPI_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Download last published data
+        run: |
+          mkdir -p data models dl
+          if gh release download data -D dl -p 'pokeprice.db.gz' -p '*.joblib' -p '*.json'; then
+            gunzip -c dl/pokeprice.db.gz > data/pokeprice.db
+            mv dl/*.joblib dl/metrics.json models/ 2>/dev/null || true
+            echo "Restored published data"
+          else
+            echo "No published data yet: this run builds it from scratch"
+          fi
+
+      - name: Decide what this run does
+        id: plan
+        run: |
+          HOUR=$(date -u +%H)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then DAILY=${{ inputs.train }}
+          elif [ "$HOUR" = "04" ]; then DAILY=true
+          else DAILY=false; fi
+          [ -f models/bundle.joblib ] || DAILY=true          # first run must train
+          echo "daily=$DAILY" >> "$GITHUB_OUTPUT"
+          echo "Daily run (TCGapi history + retrain): $DAILY"
+
+      - name: Refresh prices
+        run: |
+          ARGS=""
+          [ "${{ steps.plan.outputs.daily }}" = "true" ] || ARGS="--no-backfill"
+          [ "${{ steps.plan.outputs.daily }}" = "true" ] && [ "$(date -u +%u)" = "1" ] && ARGS="$ARGS --trends"
+          python scripts/refresh.py $ARGS
+
+      - name: Retrain
+        if: steps.plan.outputs.daily == 'true'
+        run: python scripts/train.py
+
+      - name: Precompute forecasts
+        run: python scripts/precompute.py
+
+      - name: Publish to the data release
+        run: |
+          mkdir -p out
+          python - <<'PY'
+          import json, sqlite3, datetime
+          con = sqlite3.connect("data/pokeprice.db")
+          con.execute("DELETE FROM watchlist")      # personal data never goes into the release
+          con.commit(); con.execute("VACUUM"); con.close()
+          json.dump({"version": datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%SZ")},
+                    open("out/manifest.json", "w"))
+          PY
+          gzip -c data/pokeprice.db > out/pokeprice.db.gz
+          cp models/bundle.joblib models/latest.joblib models/metrics.json out/
+          gh release view data >/dev/null 2>&1 || \
+            gh release create data --prerelease --title "Published data" \
+              --notes "Database, model and forecasts for the hosted app. Updated by the Refresh data workflow."
+          # Manifest last, so the app never sees a new version before its files are in place.
+          gh release upload data out/pokeprice.db.gz out/bundle.joblib out/latest.joblib out/metrics.json --clobber
+          gh release upload data out/manifest.json --clobber

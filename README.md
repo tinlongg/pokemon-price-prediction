@@ -62,6 +62,41 @@ Simulated rows are flagged throughout, drawn dashed in charts and down-weighted 
 and the Model Performance page shows how much data is real. Early forecasts therefore show
 how the factor model behaves, not a proven read of the real market. Not financial advice.
 
+## Deploy (Streamlit Community Cloud)
+
+The hosted app never calls the price APIs itself. A GitHub Actions workflow
+([refresh.yml](.github/workflows/refresh.yml)) runs every 4 hours. Each run downloads the
+last published data, fetches new prices, precomputes every card's forecast and publishes the
+results to a GitHub release tagged `data`. Once a day the run also pulls TCGapi history and
+retrains. The app downloads that release on startup and checks for a newer version every
+30 minutes ([remote.py](pokeprice/remote.py)).
+
+1. **Add the API keys as repository secrets:** GitHub → Settings → Secrets and variables →
+   Actions → add `POKEWALLET_API_KEY` and `TCGAPI_KEY`.
+2. **Publish the first data**, either way:
+   - GitHub → Actions → *Refresh data* → *Run workflow*. Builds everything from scratch (~15–20 min).
+   - Or from this machine, keeping the prices and card matches you already have:
+     `brew install gh && gh auth login`, then `scripts/publish_data.sh`.
+3. **Create a read-only token** (only needed while the repo is private): GitHub → Settings →
+   Developer settings → Fine-grained tokens → this repository only, *Contents: Read-only*.
+4. **Create the app** at [share.streamlit.io](https://share.streamlit.io): pick this repo,
+   branch `main`, main file `app/Home.py`. Under *Advanced settings*, choose Python 3.12 and
+   paste these secrets:
+
+   ```toml
+   POKEPRICE_DATA_REPO = "tinlongg/pokemon-price-prediction"
+   POKEPRICE_GITHUB_TOKEN = "github_pat_..."   # omit if the repo is public
+   ```
+
+Notes:
+- **Actions minutes:** each run takes about 3–5 minutes (the daily training run about 10), so
+  roughly 1,000 minutes a month. That fits the 2,000 free minutes for private repos;
+  public repos have no limit.
+- **Watchlist:** on the hosted app it's shared by all visitors and resets on restart. Your
+  local watchlist is never published (the workflow and `publish_data.sh` clear it).
+- **Running locally:** leave `POKEPRICE_DATA_REPO` unset and the app uses your own `data/`
+  and `models/`.
+
 ## Project layout
 
 ```
@@ -71,8 +106,10 @@ pokeprice/
   features/    popularity, nostalgia, rarity, supply, events, market momentum, feature builder
   model/       training + backtest, baselines, predictions, SHAP explanations, grading EV
   watchlist.py alerts and portfolio value
+  remote.py    downloads the published data for a hosted app
 app/           Streamlit pages
-scripts/       refresh.py, train.py, launchd job
+scripts/       refresh.py, train.py, precompute.py, publish_data.sh, launchd job
+.github/       workflow that refreshes and publishes data for the hosted app
 tests/         pytest (HTTP mocked, no network needed)
 ```
 
@@ -86,4 +123,3 @@ Run the tests with `.venv/bin/python -m pytest`.
 - Reddit and YouTube sentiment as extra hype signals
 - Estimating a card's grade from a photo
 - eBay sold prices, or PokéWallet Pro for real price history
-- Deploying to Streamlit Community Cloud

@@ -165,4 +165,7 @@ def train_all(db_path: Path | None = None, models_dir: Path | None = None, backt
                          {"importance": importance, "data_mix": mix, "calibration": calibration},
                          models_dir=models_dir)
     log(f"Saved models to {path}")
+    from . import precompute
+    pre = precompute.save(models_dir)
+    log(f"Precomputed forecasts to {pre}")
     return {"metrics": metrics, "path": str(path)}
