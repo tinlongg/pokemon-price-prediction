@@ -1,12 +1,13 @@
 """Fetch the published data (database, model, precomputed forecasts) for a hosted app.
 
 The GitHub Actions workflow (.github/workflows/refresh.yml) refreshes prices, retrains and
-uploads these files to a GitHub release tagged `data`. A hosted app calls `sync()` on
+uploads these files to the `data` release of a separate private repo (TCG API's terms forbid
+public downloads of its records). A hosted app calls `sync()` on
 startup and every so often; it downloads only when the release's manifest version changes.
 
 Configure with environment variables (or Streamlit secrets, which are exposed as env vars):
-  POKEPRICE_DATA_REPO   owner/repo that holds the `data` release (required to enable syncing)
-  POKEPRICE_GITHUB_TOKEN  read-only token, needed only if that repo is private
+  POKEPRICE_DATA_REPO     owner/repo of the private data repo (required to enable syncing)
+  POKEPRICE_GITHUB_TOKEN  read-only token for that repo
 """
 
 from __future__ import annotations

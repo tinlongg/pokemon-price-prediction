@@ -64,34 +64,43 @@ how the factor model behaves, not a proven read of the real market. Not financia
 
 ## Deploy (Streamlit Community Cloud)
 
-The hosted app never calls the price APIs itself. A GitHub Actions workflow
-([refresh.yml](.github/workflows/refresh.yml)) runs every 4 hours. Each run downloads the
-last published data, fetches new prices, precomputes every card's forecast and publishes the
-results to a GitHub release tagged `data`. Once a day the run also pulls TCGapi history and
-retrains. The app downloads that release on startup and checks for a newer version every
-30 minutes ([remote.py](pokeprice/remote.py)).
+The code is public; the data is not. TCG API's terms forbid public downloads of its records,
+so the database lives in a separate **private** data repo.
 
-1. **Add the API keys as repository secrets:** GitHub → Settings → Secrets and variables →
-   Actions → add `POKEWALLET_API_KEY` and `TCGAPI_KEY`.
-2. **Publish the first data**, either way:
-   - GitHub → Actions → *Refresh data* → *Run workflow*. Builds everything from scratch (~15–20 min).
+A GitHub Actions workflow ([refresh.yml](.github/workflows/refresh.yml)) runs every hour. It
+downloads the last published data from the data repo, fetches new prices, precomputes every
+card's forecast and publishes the results to that repo's `data` release. Once a day it also
+pulls TCGapi history and retrains. The hosted app downloads the release on startup and checks
+for a newer version every 30 minutes ([remote.py](pokeprice/remote.py)). The workflow and
+the seeding script both refuse to publish to a repo that isn't private.
+
+1. **Create the private data repo**, e.g. `pokeprice-data`. Tick *Add a README*: a release
+   needs at least one commit.
+2. **Create two fine-grained tokens** (GitHub → Settings → Developer settings → Fine-grained
+   tokens), each limited to the data repo only:
+   - for the workflow: *Contents: Read and write*
+   - for the app: *Contents: Read-only*
+3. **Configure this repo** (Settings → Secrets and variables → Actions):
+   - Variables tab: `POKEPRICE_DATA_REPO` = `tinlongg/pokeprice-data`
+   - Secrets tab: `DATA_REPO_TOKEN` (the read-and-write token), `POKEWALLET_API_KEY`, `TCGAPI_KEY`
+4. **Publish the first data**, either way:
+   - Actions → *Refresh data* → *Run workflow*. Builds everything from scratch (~15–20 min).
    - Or from this machine, keeping the prices and card matches you already have:
-     `brew install gh && gh auth login`, then `scripts/publish_data.sh`.
-3. **Create a read-only token** (only needed while the repo is private): GitHub → Settings →
-   Developer settings → Fine-grained tokens → this repository only, *Contents: Read-only*.
-4. **Create the app** at [share.streamlit.io](https://share.streamlit.io): pick this repo,
+     `brew install gh && gh auth login`, then `scripts/publish_data.sh tinlongg/pokeprice-data`.
+5. **Create the app** at [share.streamlit.io](https://share.streamlit.io): pick this repo,
    branch `main`, main file `app/Home.py`. Under *Advanced settings*, choose Python 3.12 and
    paste these secrets:
 
    ```toml
-   POKEPRICE_DATA_REPO = "tinlongg/pokemon-price-prediction"
-   POKEPRICE_GITHUB_TOKEN = "github_pat_..."   # omit if the repo is public
+   POKEPRICE_DATA_REPO = "tinlongg/pokeprice-data"
+   POKEPRICE_GITHUB_TOKEN = "github_pat_..."   # the read-only token
    ```
 
 Notes:
-- **Actions minutes:** each run takes about 3–5 minutes (the daily training run about 10), so
-  roughly 1,000 minutes a month. That fits the 2,000 free minutes for private repos;
-  public repos have no limit.
+- **Actions minutes:** public repos have no limit, so the workflow runs hourly. That uses
+  PokéWallet's free 100 requests/hour, which covers every card several times a day.
+- **Inactive repos:** GitHub pauses scheduled workflows in public repos after 60 days without
+  commits. Re-enable it from the Actions tab if that happens.
 - **Watchlist:** on the hosted app it's shared by all visitors and resets on restart. Your
   local watchlist is never published (the workflow and `publish_data.sh` clear it).
 - **Running locally:** leave `POKEPRICE_DATA_REPO` unset and the app uses your own `data/`
@@ -121,7 +130,7 @@ Run the tests with `.venv/bin/python -m pytest`.
   pokewallet.io wherever its data is shown publicly. The app shows this in the sidebar.
 - **TCG API:** the free plan is for non-commercial use only. Its licensing page forbids
   "public, unrestricted downloads of our records", so the published database must stay in
-  a private place, never a public release.
+  a private repo, never a public release (see Deploy).
 - **Pokémon TCG API:** deprecated and now part of Scrydex. Keys work until March 1, 2027.
 - Pokémon and card artwork belong to Nintendo, Game Freak and The Pokémon Company. This
   project isn't affiliated with them.

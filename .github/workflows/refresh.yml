@@ -1,15 +1,20 @@
-# Keeps the hosted app's data fresh. Every 4 hours: download the last published data,
-# fetch new prices, (once a day) pull TCGapi history and retrain, precompute forecasts,
-# then publish everything to the `data` release that the app downloads.
+# Keeps the hosted app's data fresh. Every hour: download the last published data, fetch
+# new prices, (once a day) pull TCGapi history and retrain, precompute forecasts, then
+# publish everything to the `data` release of a separate PRIVATE data repo.
 #
-# Needs repository secrets POKEWALLET_API_KEY and TCGAPI_KEY.
-# Run it by hand the first time (Actions tab -> Refresh data -> Run workflow) to seed the
-# release, or seed it from your own machine with scripts/publish_data.sh.
+# The data must never be published from this (public) repo: TCG API's terms forbid public
+# downloads of its records. The first step refuses to run unless the data repo is private.
+#
+# Setup (Settings -> Secrets and variables -> Actions):
+#   Variable  POKEPRICE_DATA_REPO  owner/name of the private data repo, e.g. tinlongg/pokeprice-data
+#   Secret    DATA_REPO_TOKEN      fine-grained token for that repo only, Contents: Read and write
+#   Secret    POKEWALLET_API_KEY
+#   Secret    TCGAPI_KEY
 name: Refresh data
 
 on:
   schedule:
-    - cron: "17 */4 * * *"        # 00:17, 04:17, ... UTC
+    - cron: "17 * * * *"          # hourly; PokéWallet's free tier allows 100 requests/hour
   workflow_dispatch:
     inputs:
       train:
@@ -18,7 +23,7 @@ on:
         default: true
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: refresh-data
@@ -29,10 +34,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      GH_TOKEN: ${{ github.token }}
+      DATA_REPO: ${{ vars.POKEPRICE_DATA_REPO }}
+      GH_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
       POKEWALLET_API_KEY: ${{ secrets.POKEWALLET_API_KEY }}
       TCGAPI_KEY: ${{ secrets.TCGAPI_KEY }}
     steps:
+      - name: Check the data repo is set up and private
+        run: |
+          if [ -z "$DATA_REPO" ] || [ -z "$GH_TOKEN" ]; then
+            echo "::error::Set the POKEPRICE_DATA_REPO variable and DATA_REPO_TOKEN secret (see the README)."
+            exit 1
+          fi
+          if [ "$DATA_REPO" = "${{ github.repository }}" ]; then
+            echo "::error::POKEPRICE_DATA_REPO must be a separate private repo, not this one."
+            exit 1
+          fi
+          PRIVATE=$(gh api "repos/$DATA_REPO" --jq .private)
+          if [ "$PRIVATE" != "true" ]; then
+            echo "::error::$DATA_REPO is not private. Its data can't be published publicly (TCG API terms)."
+            exit 1
+          fi
+          echo "Publishing to private repo $DATA_REPO"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -47,7 +70,7 @@ jobs:
       - name: Download last published data
         run: |
           mkdir -p data models dl
-          if gh release download data -D dl -p 'pokeprice.db.gz' -p '*.joblib' -p '*.json'; then
+          if gh release download data -R "$DATA_REPO" -D dl -p 'pokeprice.db.gz' -p '*.joblib' -p '*.json'; then
             gunzip -c dl/pokeprice.db.gz > data/pokeprice.db
             mv dl/*.joblib dl/metrics.json models/ 2>/dev/null || true
             echo "Restored published data"
@@ -80,7 +103,7 @@ jobs:
       - name: Precompute forecasts
         run: python scripts/precompute.py
 
-      - name: Publish to the data release
+      - name: Publish to the private data repo
         run: |
           mkdir -p out
           python - <<'PY'
@@ -93,9 +116,9 @@ jobs:
           PY
           gzip -c data/pokeprice.db > out/pokeprice.db.gz
           cp models/bundle.joblib models/latest.joblib models/metrics.json out/
-          gh release view data >/dev/null 2>&1 || \
-            gh release create data --prerelease --title "Published data" \
-              --notes "Database, model and forecasts for the hosted app. Updated by the Refresh data workflow."
+          gh release view data -R "$DATA_REPO" >/dev/null 2>&1 || \
+            gh release create data -R "$DATA_REPO" --title "Published data" \
+              --notes "Database, model and forecasts for the PokéPrice app. Updated by the Refresh data workflow."
           # Manifest last, so the app never sees a new version before its files are in place.
-          gh release upload data out/pokeprice.db.gz out/bundle.joblib out/latest.joblib out/metrics.json --clobber
-          gh release upload data out/manifest.json --clobber
+          gh release upload data -R "$DATA_REPO" out/pokeprice.db.gz out/bundle.joblib out/latest.joblib out/metrics.json --clobber
+          gh release upload data -R "$DATA_REPO" out/manifest.json --clobber
