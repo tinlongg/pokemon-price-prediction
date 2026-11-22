@@ -144,7 +144,7 @@ def set_tcgapi_match(card_id: str, tcgapi_id: str, printing: str | None, db_path
 def load_cards(db_path: Path | None = None) -> pd.DataFrame:
     with connect(db_path) as conn:
         df = pd.read_sql("SELECT * FROM cards", conn)
-    df["subtypes"] = df["subtypes"].apply(lambda s: json.loads(s) if s else [])
+    df["subtypes"] = df["subtypes"].apply(lambda s: json.loads(s) if isinstance(s, str) and s else [])
     return df
 
 
@@ -163,10 +163,17 @@ def insert_snapshots(rows: Iterable[dict], db_path: Path | None = None) -> int:
     return len(data)
 
 
-def delete_synthetic_prices(db_path: Path | None = None) -> None:
+def delete_synthetic_prices(card_ids: list[str] | None = None, db_path: Path | None = None) -> None:
+    """Delete simulated prices for some cards, or all simulated prices and trends."""
     with connect(db_path) as conn:
-        conn.execute("DELETE FROM price_snapshots WHERE is_synthetic=1")
-        conn.execute("DELETE FROM trends WHERE is_synthetic=1")
+        if card_ids is None:
+            conn.execute("DELETE FROM price_snapshots WHERE is_synthetic=1")
+            conn.execute("DELETE FROM trends WHERE is_synthetic=1")
+            return
+        for i in range(0, len(card_ids), 500):
+            chunk = card_ids[i:i + 500]
+            conn.execute(f"DELETE FROM price_snapshots WHERE is_synthetic=1 AND card_id IN "
+                         f"({','.join('?' * len(chunk))})", chunk)
 
 
 def load_prices(card_ids: list[str] | None = None, include_synthetic: bool = True,

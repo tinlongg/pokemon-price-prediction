@@ -175,6 +175,11 @@ def require_data() -> bool:
 def card_picker(key: str = "card_picker") -> pd.Series:
     """Searchable card selector shared across pages via session state."""
     c = cards()
+    # Only cards with a forecast. Newly added cards appear once they have a real price
+    # (usually within a day, as the hourly refresh works through them).
+    latest, _ = latest_and_forecasts()
+    if not latest.empty:
+        c = c[c["card_id"].isin(latest.index)]
     ids = c["card_id"].tolist()
     current = st.session_state.get("card_id", ids[0])
     idx = ids.index(current) if current in ids else 0

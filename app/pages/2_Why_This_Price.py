@@ -42,7 +42,7 @@ with left:
         text=[f"{v:+.1f}%" for v in groups["pct"] * 100], textposition="outside"))
     fig.update_layout(height=340, margin=dict(l=10, r=40, t=10, b=10), xaxis_title="Effect on forecast (%)",
                       yaxis=dict(autorange="reversed"))
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
     st.subheader("In plain English")
     for r in reasons(contrib, card["name"], card["pokemon"], top=6):
@@ -57,7 +57,7 @@ with right:
         text=[f"{v:+.1f}" for v in top["shap"] * 100], textposition="outside"))
     fig.update_layout(height=520, margin=dict(l=10, r=40, t=10, b=10),
                       xaxis_title="Contribution (log-return points ×100)")
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 with st.expander("All factor values for this card"):
     st.dataframe(contrib[["group", "label", "value", "pct"]], hide_index=True, column_config={

@@ -21,6 +21,10 @@ on:
         description: "Also pull TCGapi history and retrain"
         type: boolean
         default: true
+      rebuild_cards:
+        description: "Rebuild the card list (adds new sets' IRs/SIRs; also runs on the 1st of each month)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,7 +36,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       DATA_REPO: ${{ vars.POKEPRICE_DATA_REPO }}
       GH_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
@@ -86,14 +90,20 @@ jobs:
           elif [ "$HOUR" = "04" ]; then DAILY=true
           else DAILY=false; fi
           [ -f models/bundle.joblib ] || DAILY=true          # first run must train
+          # Rebuild the card list monthly (the daily run on the 1st), or on request.
+          REBUILD=false
+          [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.rebuild_cards }}" = "true" ] && REBUILD=true
+          [ "$DAILY" = "true" ] && [ "$(date -u +%d)" = "01" ] && REBUILD=true
           echo "daily=$DAILY" >> "$GITHUB_OUTPUT"
-          echo "Daily run (TCGapi history + retrain): $DAILY"
+          echo "rebuild=$REBUILD" >> "$GITHUB_OUTPUT"
+          echo "Daily run (TCGapi history + retrain): $DAILY · rebuild card list: $REBUILD"
 
       - name: Refresh prices
         run: |
           ARGS=""
           [ "${{ steps.plan.outputs.daily }}" = "true" ] || ARGS="--no-backfill"
           [ "${{ steps.plan.outputs.daily }}" = "true" ] && [ "$(date -u +%u)" = "1" ] && ARGS="$ARGS --trends"
+          [ "${{ steps.plan.outputs.rebuild }}" = "true" ] && ARGS="$ARGS --universe"
           python scripts/refresh.py $ARGS
 
       - name: Retrain

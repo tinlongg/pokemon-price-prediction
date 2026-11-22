@@ -51,8 +51,10 @@ class PokemonTCGProvider:
 
     def search(self, q: str, page_size: int = 250, max_pages: int = 4) -> Iterator[dict]:
         for page in range(1, max_pages + 1):
+            # A fixed sort order is required for paging: without it, pokemontcg.io can return
+            # the same card on two pages and skip others.
             data = self.http.get("/cards", {"q": q, "pageSize": page_size, "page": page,
-                                            "select": SELECT})
+                                            "orderBy": "id", "select": SELECT})
             yield from data.get("data", [])
             if page * page_size >= data.get("totalCount", 0):
                 break

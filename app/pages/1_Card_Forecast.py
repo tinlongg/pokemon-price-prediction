@@ -71,7 +71,7 @@ fig.update_layout(height=460, margin=dict(l=10, r=10, t=30, b=10), hovermode="x 
 log_scale = st.toggle("Log scale", value=False)
 if log_scale:
     fig.update_yaxes(type="log")
-st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 st.caption("Each horizon is calibrated on its own backtest: where the model showed little skill (so far the "
            "12-month horizon), its forecast is pulled toward today's price and its range is widened. "
            "That's why a longer horizon can show a smaller move than a shorter one.")

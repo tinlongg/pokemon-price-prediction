@@ -29,13 +29,26 @@ cp .env.example .env        # add POKEWALLET_API_KEY and TCGAPI_KEY (both free)
 ## Run it
 
 ```bash
-.venv/bin/python scripts/refresh.py --universe   # first run: choose ~600 cards, fetch prices, simulate history (~8 min)
+.venv/bin/python scripts/refresh.py --universe   # first run: choose ~1,600 cards, fetch prices, simulate history (~10 min)
 .venv/bin/python scripts/train.py                # train and backtest the models (~1–2 min)
 .venv/bin/streamlit run app/Home.py
 ```
 
 After that, run `scripts/refresh.py` daily (or hourly; see below) to record real prices, and
 retrain now and then. Add `--trends` about once a week to pull Google Trends.
+
+## Which cards are tracked
+
+- **Every Illustration Rare and Special Illustration Rare**: about 1,000 cards across the 25
+  sets from Scarlet & Violet (March 2023) onwards. These are always tracked, even when
+  pokemontcg.io has no price for them (common for the newest sets); PokéWallet prices them.
+- **Up to 600 other collector cards**: vintage WOTC holos, gold stars and shinings, other
+  modern chase cards, and popular Pokémon across eras. A quarter of these slots are spread
+  across eras so the model also sees ordinary cards.
+
+The list is rebuilt on the 1st of each month by the hosted workflow (or with
+`refresh.py --universe`), so new sets' IRs and SIRs are added automatically. A newly added
+card shows up in the app once it has its first real price, usually within a day.
 
 ## Data sources
 
@@ -57,6 +70,11 @@ None of the free APIs offer long price history, so the app records its own daily
 from the first run on. Until enough real history builds up, the model also trains on a
 **simulated** multi-year history for each card, built from the same factors and ending at the
 card's real current price (see [synthetic.py](pokeprice/ingest/synthetic.py)).
+
+A card gets simulated history only once it has a real price to end at, and only cards that
+need it are regenerated (new cards, or a card whose first real price changed). Each card's and
+each Pokémon's simulated series is seeded on its own, so it stays the same however the rest
+of the card list changes.
 
 Simulated rows are flagged throughout, drawn dashed in charts and down-weighted in training,
 and the Model Performance page shows how much data is real. Early forecasts therefore show

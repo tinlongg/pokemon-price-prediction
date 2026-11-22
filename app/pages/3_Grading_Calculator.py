@@ -16,6 +16,9 @@ require_data()
 
 card = card_picker()
 latest, fc = latest_and_forecasts()
+if card.name not in latest.index:
+    st.warning("No price for this card yet.")
+    st.stop()
 row = latest.loc[card.name]
 f12 = fc[(fc["card_id"] == card.name) & (fc["horizon"] == 365)]
 
@@ -44,7 +47,7 @@ with left:
                            text=[f"{v:.0%}" for v in (res.p10, res.p9, res.p_low)], textposition="outside"))
     fig.update_layout(title="Estimated grade odds", height=320, yaxis_tickformat=".0%",
                       margin=dict(l=10, r=10, t=40, b=10))
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 with right:
     st.markdown("**How to read this**")
     if res.breakeven_p10 <= 0.005:

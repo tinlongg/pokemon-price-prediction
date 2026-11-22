@@ -89,3 +89,40 @@ def test_series_stays_on_one_source_family(seeded_db):
     assert set(p["source"]) == {"pokewallet"}                 # pokemontcg dropped, PokéWallet wins the day
     # Cards with only pokemontcg.io data keep it.
     assert set(db.load_prices(["base1-4"])["source"]) == {"pokemontcg"}
+
+
+def test_synthetic_is_the_same_whichever_cards_are_generated_together(seeded_db):
+    cards = db.load_cards()
+    anchors = pd.DataFrame({"card_id": ["base1-4", "sv3pt5-199"], "date": ["2026-11-20"] * 2,
+                            "market": [950.0, 220.0]})
+    both, trends_both = generate(cards, anchors, years=2, end=pd.Timestamp("2026-11-21").date())
+    alone, trends_alone = generate(cards, anchors.iloc[:1], years=2, end=pd.Timestamp("2026-11-21").date())
+    a = both[both["card_id"] == "base1-4"].reset_index(drop=True)
+    assert a["market"].equals(alone["market"].reset_index(drop=True))
+    # Both cards are Charizard: the hype (search interest) series is shared and identical.
+    tb = trends_both[trends_both["pokemon"] == "Charizard"].reset_index(drop=True)
+    assert tb["interest"].equals(trends_alone["interest"].reset_index(drop=True))
+
+
+def test_ensure_synthetic_only_touches_cards_that_need_it(seeded_db):
+    from pokeprice.ingest.synthetic import ensure_synthetic
+    ensure_synthetic(log=lambda *_: None)
+    before = db.load_prices(["base1-58"])
+    assert ensure_synthetic(log=lambda *_: None) == 0          # nothing changed: nothing to do
+    # An older real price arrives for one card (e.g. a TCGapi backfill): only it is redone,
+    # and its simulated history now ends the day before the new first real price.
+    db.insert_snapshots([{"card_id": "base1-4", "date": "2026-11-10", "source": "pokemontcg",
+                          "market": 940.0, "is_synthetic": 0}])
+    assert ensure_synthetic(log=lambda *_: None) > 0
+    syn = db.load_prices(["base1-4"])
+    assert syn.loc[syn["is_synthetic"] == 1, "date"].max() == pd.Timestamp("2026-11-09")
+    assert db.load_prices(["base1-58"])["market"].equals(before["market"])
+
+
+def test_cards_without_a_real_price_get_no_simulated_history(seeded_db):
+    from pokeprice.ingest.synthetic import ensure_synthetic
+    db.upsert_cards([{"card_id": "me6-200", "name": "Pikachu ex", "pokemon": "Pikachu",
+                      "supertype": "Pokémon", "set_name": "Delta Reign", "release_date": "2026-11-06",
+                      "number": "200", "rarity": "Special Illustration Rare"}])
+    ensure_synthetic(log=lambda *_: None)
+    assert db.load_prices(["me6-200"]).empty

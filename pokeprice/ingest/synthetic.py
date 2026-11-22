@@ -7,12 +7,19 @@ Each card gets a daily price path built from the same factors the model uses:
   * a post-release hype premium that fades for new sets
   * occasional reprint shocks that dent the price and slowly recover
   * noise that is larger for cheaper cards
-The path is shifted so it ends at the card's real current price. Every row is flagged
+The path is shifted so it ends at the card's first real price. Every row is flagged
 is_synthetic=1, shown dashed in the app, and down-weighted in training.
+
+Randomness is seeded per series (the market, each Pokémon, each card) on a fixed calendar
+starting at ORIGIN, so a Pokémon's hype series and a card's path come out the same no matter
+which other cards are generated alongside them or on which day. That lets new cards be added,
+or one card be re-anchored, without regenerating everything. Cards with no real price yet get
+no simulated history; they join once PokéWallet or TCGapi has priced them.
 """
 
 from __future__ import annotations
 
+import zlib
 from datetime import date, timedelta
 from typing import Callable
 
@@ -23,6 +30,8 @@ from .. import db
 from ..config import settings
 from ..features.build import add_time_card_features, card_static_features
 from ..features.events import build_calendar
+
+ORIGIN = pd.Timestamp("2015-01-01")   # every random series starts here, so they line up
 
 # (start date, annualised log drift of the overall collector market)
 MARKET_REGIMES = [
@@ -51,50 +60,59 @@ def _event_signal(dates: pd.DatetimeIndex, cal: pd.DataFrame) -> np.ndarray:
     return out
 
 
-def base_price_estimate(row: pd.Series) -> float:
-    """Rough fallback price when a card has no real price yet."""
-    return float(np.exp(0.8 + 3.0 * row["popularity"] + 0.5 * row["rarity_tier"]
-                        + 1.5 * (row["era_idx"] == 0) + 0.5 * row["artist_premium"]))
+def _rng(seed: int, key: str) -> np.random.Generator:
+    """Independent, reproducible random stream for one named series."""
+    return np.random.default_rng([seed, zlib.crc32(key.encode("utf-8"))])
+
+
+def _ar1(shocks: np.ndarray, phi: float = 0.993) -> np.ndarray:
+    try:
+        from scipy.signal import lfilter
+        out = lfilter([1.0], [1.0, -phi], shocks)
+        out -= shocks[0] * phi ** np.arange(len(shocks))   # start the series at 0
+        return out
+    except ImportError:  # scipy ships with scikit-learn, but keep a fallback
+        h = np.zeros(len(shocks))
+        for t in range(1, len(h)):
+            h[t] = phi * h[t - 1] + shocks[t]
+        return h
 
 
 def generate(cards: pd.DataFrame, anchors: pd.DataFrame, years: int | None = None,
              end: date | None = None, seed: int = 7) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Return (price rows, trend rows). `anchors` has card_id, date, market: the first real price
-    for each card. Simulated history runs up to the day before that date."""
-    rng = np.random.default_rng(seed)
+    """Return (price rows, trend rows) for the given cards. `anchors` has card_id, date, market:
+    each card's first real price. A card's history runs up to the day before that date; cards
+    without an anchor are skipped."""
     years = years or settings.synthetic_years
     end = end or date.today()
-    start = pd.Timestamp(end - timedelta(days=int(365.25 * years)))
-    all_dates = pd.date_range(start, pd.Timestamp(end), freq="D")
-    cal = build_calendar(all_dates[0].year, all_dates[-1].year + 1)
-    market = np.cumsum(_market_path(all_dates, rng))
+    all_dates = pd.date_range(ORIGIN, pd.Timestamp(end), freq="D")
+    window_start = pd.Timestamp(end - timedelta(days=int(365.25 * years)))
+    in_window = all_dates >= window_start
+    cal = build_calendar(ORIGIN.year, all_dates[-1].year + 1)
+    market = np.cumsum(_market_path(all_dates, _rng(seed, "market")))
     events = _event_signal(all_dates, cal)
 
     static = card_static_features(cards).set_index("card_id")
     anchors = anchors.set_index("card_id") if not anchors.empty else pd.DataFrame(columns=["date", "market"])
+    static = static[static.index.isin(anchors.index)]
 
     # Per-Pokémon hype series (AR(1) + events), shared by all cards of that Pokémon.
     hype: dict[str, np.ndarray] = {}
     trend_rows = []
+    weekly = np.flatnonzero(in_window)[::7]
     for pkmn, pop in static.groupby("pokemon")["popularity"].first().items():
-        shocks = rng.normal(0, 0.035, len(all_dates))
-        h = np.zeros(len(all_dates))
-        for t in range(1, len(h)):
-            h[t] = 0.993 * h[t - 1] + shocks[t]
+        h = _ar1(_rng(seed, f"hype:{pkmn}").normal(0, 0.035, len(all_dates)))
         hype[pkmn] = h
         interest = np.clip(15 + 55 * pop + 12 * h + 25 * events * (0.5 + pop), 1, 100)
-        weekly = slice(None, None, 7)
         trend_rows.append(pd.DataFrame({"pokemon": pkmn, "date": all_dates[weekly].strftime("%Y-%m-%d"),
                                         "interest": interest[weekly].round(1), "is_synthetic": 1}))
 
     price_frames = []
     for cid, c in static.iterrows():
-        if cid in anchors.index:
-            a_date = pd.Timestamp(anchors.loc[cid, "date"])
-            a_price = float(anchors.loc[cid, "market"])
-        else:
-            a_date, a_price = pd.Timestamp(end), base_price_estimate(c)
-        first = max(all_dates[0], c["release_date"]) if pd.notna(c["release_date"]) else all_dates[0]
+        rng = _rng(seed, f"card:{cid}")
+        a_date = pd.Timestamp(anchors.loc[cid, "date"])
+        a_price = float(anchors.loc[cid, "market"])
+        first = max(window_start, c["release_date"]) if pd.notna(c["release_date"]) else window_start
         mask = (all_dates >= first) & (all_dates < a_date)
         if mask.sum() < 30:
             continue
@@ -138,24 +156,34 @@ def generate(cards: pd.DataFrame, anchors: pd.DataFrame, years: int | None = Non
 
 
 def ensure_synthetic(force: bool = False, log: Callable[[str], None] = print) -> int:
-    """(Re)generate simulated history for every card, anchored to its first real price."""
+    """Make sure every priced card has simulated history that ends the day before its first
+    real price. Only cards that need it are (re)generated: new cards, cards that just got their
+    first price, and cards whose first real price moved (e.g. a TCGapi backfill added older
+    days, or the card switched to a daily price source). `force` regenerates every card."""
     cards = db.load_cards()
     if cards.empty:
         return 0
-    if force:
-        db.delete_synthetic_prices()
-    else:
-        mix = db.data_mix()
-        if mix["synthetic"]["cards"] >= len(cards) * 0.9:
-            log("Simulated history already exists (use --resimulate to rebuild it).")
-            return 0
-        db.delete_synthetic_prices()
     real = db.load_prices(include_synthetic=False)
-    anchors = (real.sort_values("date").groupby("card_id").first().reset_index()[["card_id", "date", "market"]]
-               if not real.empty else pd.DataFrame(columns=["card_id", "date", "market"]))
-    prices, trends = generate(cards, anchors)
+    if real.empty:
+        log("Simulated history: no real prices yet, nothing to anchor to.")
+        return 0
+    anchors = real.sort_values("date").groupby("card_id").first().reset_index()[["card_id", "date", "market"]]
+    with db.connect() as conn:
+        syn_last = pd.read_sql("SELECT card_id, MAX(date) AS last FROM price_snapshots "
+                               "WHERE is_synthetic=1 GROUP BY card_id", conn).set_index("card_id")["last"]
+    expected = (anchors.set_index("card_id")["date"] - pd.Timedelta(days=1)).dt.strftime("%Y-%m-%d")
+    if force:
+        todo = list(expected.index)
+    else:
+        todo = [cid for cid, exp in expected.items() if syn_last.get(cid) != exp]
+    if not todo:
+        log("Simulated history is up to date.")
+        return 0
+    db.delete_synthetic_prices(todo)
+    prices, trends = generate(cards[cards["card_id"].isin(todo)], anchors[anchors["card_id"].isin(todo)])
     n = db.insert_snapshots(prices.to_dict("records"))
     if not trends.empty:
         db.insert_trends(trends.to_dict("records"))
-    log(f"Simulated history: {n:,} daily prices for {prices['card_id'].nunique() if n else 0} cards")
+    log(f"Simulated history: {n:,} daily prices for {prices['card_id'].nunique() if n else 0} cards "
+        f"({len(todo)} needed it)")
     return n

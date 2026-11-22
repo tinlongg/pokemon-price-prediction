@@ -57,7 +57,7 @@ if rows:
         fig.add_bar(x=t["Horizon"], y=t[col], name=col.replace(" MAE", ""), marker_color=color)
     fig.update_layout(barmode="group", height=340, yaxis_title="Mean abs. error (log return)",
                       margin=dict(l=10, r=10, t=10, b=10))
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     st.caption("Lower is better. Calibration scales each horizon's forecast toward 'no change' by how much "
                "skill the model showed in the backtest, and widens its range until p10–p90 covers about 80% "
                "of outcomes. A low shrink (e.g. at 12 months) means long-range moves aren't predictable yet.")
@@ -74,4 +74,4 @@ fig = go.Figure(go.Bar(x=groups.values, y=groups.index, orientation="h", marker_
                        text=[f"{v:.0%}" for v in groups.values], textposition="outside"))
 fig.update_layout(height=320, xaxis_tickformat=".0%", margin=dict(l=10, r=40, t=10, b=10),
                   xaxis_title="Share of model gain")
-st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
