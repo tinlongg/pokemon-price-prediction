@@ -115,6 +115,17 @@ tests/         pytest (HTTP mocked, no network needed)
 
 Run the tests with `.venv/bin/python -m pytest`.
 
+## Data credits and terms
+
+- **PokéWallet:** its terms require a visible "Data by PokéWallet" credit linking to
+  pokewallet.io wherever its data is shown publicly. The app shows this in the sidebar.
+- **TCG API:** the free plan is for non-commercial use only. Its licensing page forbids
+  "public, unrestricted downloads of our records", so the published database must stay in
+  a private place, never a public release.
+- **Pokémon TCG API:** deprecated and now part of Scrydex. Keys work until March 1, 2027.
+- Pokémon and card artwork belong to Nintendo, Game Freak and The Pokémon Company. This
+  project isn't affiliated with them.
+
 ## Ideas for later
 
 - Sealed product: is a booster box worth more opened or kept sealed?

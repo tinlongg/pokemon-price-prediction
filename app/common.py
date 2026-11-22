@@ -104,9 +104,20 @@ def data_mix() -> dict:
     return _mix(_db_stamp())
 
 
+def credits() -> None:
+    """Data credits. PokéWallet's terms (section 4.4) require a visible, linked credit when its
+    data is shown publicly; TCGapi suggests one."""
+    line = ("Data by [PokéWallet](https://www.pokewallet.io) · Pricing data via [TCG API](https://tcgapi.dev) "
+            "· Card data and images from the [Pokémon TCG API](https://pokemontcg.io)")
+    st.caption(line)   # in the page body, so it stays visible when the sidebar is collapsed
+    st.sidebar.caption("Not affiliated with Nintendo, Game Freak or The Pokémon Company. Forecasts are "
+                       "estimates, not financial advice.")
+
+
 def require_data() -> bool:
     """Pull fresh published data (hosted app), then show setup steps and stop the page if
     there is no data or model yet. Every page calls this first."""
+    credits()
     if hosted():
         _sync()
     if cards().empty:
