@@ -39,7 +39,7 @@ retrain now and then. Add `--trends` about once a week to pull Google Trends.
 
 ## Which cards are tracked
 
-- **Every Illustration Rare and Special Illustration Rare**: about 1,000 cards across the 25
+- **Every Illustration Rare and Special Illustration Rare**: 763 cards across the 25
   sets from Scarlet & Violet (March 2023) onwards. These are always tracked, even when
   pokemontcg.io has no price for them (common for the newest sets); PokéWallet prices them.
 - **Up to 600 other collector cards**: vintage WOTC holos, gold stars and shinings, other

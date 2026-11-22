@@ -1,7 +1,7 @@
 """Choose which cards to track.
 
-1. Every Illustration Rare and Special Illustration Rare (Scarlet & Violet onwards, about
-   1,000 cards across 25 sets). These are always kept, even without a pokemontcg.io price:
+1. Every Illustration Rare and Special Illustration Rare (Scarlet & Violet onwards,
+   763 cards across 25 sets). These are always kept, even without a pokemontcg.io price:
    PokéWallet prices them, and newer sets often have no pokemontcg.io prices at all.
 2. Up to `max_cards` (600) other cards that matter to collectors: vintage WOTC holos, gold
    stars and shinings, other modern chase cards, and popular Pokémon across eras. These are
