@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Runs the price snapshot every hour so PokéWallet's free tier (100 requests/hour,
+  1,000/day) covers all tracked cards each day. Edit the two paths below, then:
+    cp scripts/com.pokeprice.refresh.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.pokeprice.refresh.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.pokeprice.refresh</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/ABSOLUTE/PATH/TO/pokemon-price-prediction/.venv/bin/python</string>
+    <string>/ABSOLUTE/PATH/TO/pokemon-price-prediction/scripts/refresh.py</string>
+  </array>
+  <key>StartInterval</key><integer>3600</integer>
+  <key>StandardOutPath</key><string>/tmp/pokeprice-refresh.log</string>
+  <key>StandardErrorPath</key><string>/tmp/pokeprice-refresh.log</string>
+</dict>
+</plist>
